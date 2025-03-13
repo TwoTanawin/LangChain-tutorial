@@ -1,0 +1,16 @@
+django
+djangorestframework
+markdown
+django-filter
+qdrant-client
+transformers 
+# torch 
+langchain 
+faiss-cpu
+langchain-huggingface
+langchain-qdrant
+langchain-groq
+langchain[groq]
+dotenv
+langchain-ollama
+langchain-community
