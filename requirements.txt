@@ -14,3 +14,7 @@ langchain[groq]
 dotenv
 langchain-ollama
 langchain-community
+faiss-cpu
+pypdf
+langchainhub
+pymupdf
