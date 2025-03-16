@@ -18,7 +18,8 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Connect to Qdrant
 print("Connecting to Qdrant...")
-qdrant_client = QdrantClient(host="localhost", port=6333)
+qdrant_client = QdrantClient(url="localhost:6334", prefer_grpc=True)
+
 collection_name = "docs_collection"
 collections = qdrant_client.get_collections()
 print(collections)
@@ -74,7 +75,7 @@ def run_llm(query: str):
 
 if __name__ == "__main__":
     print("Hello ...")
-    res = run_llm(query="What is LangChain?")
+    res = run_llm(query="What is Langchain Chain?")
     
     # Print output safely
     if "answer" in res:

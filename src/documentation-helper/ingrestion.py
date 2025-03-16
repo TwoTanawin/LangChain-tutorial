@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter  
 from langchain_huggingface import HuggingFaceEmbeddings
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct, VectorParams, Distance
+from qdrant_client.models import PointStruct, VectorParams, Distance, OptimizersConfigDiff
 from langchain_community.document_loaders import ReadTheDocsLoader
 import torch
 import time
@@ -11,8 +11,11 @@ import os
 # Load environment variables
 load_dotenv()
 
-# Initialize Qdrant client with a much longer timeout
-qdrant_client = QdrantClient(host="localhost", port=6333)
+# Initialize Qdrant client with gRPC
+qdrant_client = QdrantClient(
+    url="localhost:6334",  # Use gRPC URL
+    prefer_grpc=True  # Enable gRPC communication
+)
 
 collection_name = "docs_collection"
 
@@ -20,10 +23,10 @@ collection_name = "docs_collection"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def ingest_docs():
-    """Loads, processes, and indexes documents into Qdrant."""
+    """Loads, processes, and indexes documents into Qdrant using gRPC."""
     
     # Load documents
-    docs_path = r"E:\Computing\LLm-Engineer\LangChain-tutorial\src\documentation-helper\langchain-docs\api.python.langchain.com\en\latest"
+    docs_path = r"E:\\Computing\\LLm-Engineer\\LangChain-tutorial\\src\\documentation-helper\\langchain-docs\\api.python.langchain.com\\en\\latest"
     
     # Check if the path exists
     if not os.path.exists(docs_path):
@@ -70,7 +73,6 @@ def ingest_docs():
             embeddings.append(embedding.embed_query(doc.page_content))
         except Exception as e:
             print(f"❌ Error embedding document {i}: {e}")
-            # Skip this document but continue with others
             continue
 
     if not embeddings:
@@ -81,46 +83,28 @@ def ingest_docs():
     
     # Check if collection exists and create if needed
     try:
-        collection_exists = False
         collections = qdrant_client.get_collections().collections
-        for collection in collections:
-            if collection.name == collection_name:
-                collection_exists = True
-                print(f"✅ Collection '{collection_name}' exists.")
-                break
-                
-        if not collection_exists:
-            print("🚀 Creating new Qdrant collection...")
-            # Create collection with retry logic
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    qdrant_client.create_collection(
-                        collection_name=collection_name,
-                        vectors_config=VectorParams(
-                            size=vector_size,
-                            distance=Distance.COSINE
-                        )
-                    )
-                    print("✅ Collection created successfully.")
-                    break
-                except Exception as e:
-                    print(f"❌ Attempt {attempt+1}/{max_retries} failed: {e}")
-                    if attempt < max_retries - 1:
-                        wait_time = 10 * (attempt + 1)  # Exponential backoff
-                        print(f"⏳ Waiting {wait_time} seconds before retrying...")
-                        time.sleep(wait_time)
-                    else:
-                        print("❌ Failed to create collection after multiple attempts.")
-                        return
+        collection_names = [collection.name for collection in collections]
+        
+        if collection_name not in collection_names:
+            print("🚀 Creating new Qdrant collection via gRPC with proper indexing...")
+            qdrant_client.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(
+                    size=vector_size,
+                    distance="Cosine"
+                )
+            )
+            print("✅ Collection created successfully with indexing configuration.")
+        else:
+            print(f"✅ Collection '{collection_name}' exists.")
     except Exception as e:
-        print(f"❌ Error checking collections: {e}")
+        print(f"❌ Error checking or creating collection: {e}")
         return
 
     print("📤 Uploading data to Qdrant in batches...")
 
-    # Reduce batch size to avoid timeouts
-    batch_size = 50  # Reduced from 1000 to 100
+    batch_size = 50  
     total_docs = len(embeddings)
 
     for i in range(0, total_docs, batch_size):
@@ -130,7 +114,7 @@ def ingest_docs():
 
         points = [
             PointStruct(
-                id=(i * batch_size) + idx,  # Ensure globally unique IDs
+                id=i + idx,  
                 vector=batch_embeddings[idx],
                 payload={
                     "text": batch_texts[idx].page_content,
@@ -140,22 +124,26 @@ def ingest_docs():
             for idx in range(len(batch_embeddings))
         ]
         
-        # Upload batch with retry logic
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                qdrant_client.upsert(collection_name=collection_name, points=points)
-                print(f"✅ Uploaded batch {i // batch_size + 1}/{(total_docs // batch_size) + 1}")
-                break
-            except Exception as e:
-                print(f"❌ Attempt {attempt+1}/{max_retries} failed for batch {i // batch_size + 1}: {e}")
-                if attempt < max_retries - 1:
-                    wait_time = 10 * (attempt + 1)
-                    print(f"⏳ Waiting {wait_time} seconds before retrying...")
-                    time.sleep(wait_time)
-                else:
-                    print(f"❌ Failed to upload batch {i // batch_size + 1} after multiple attempts.")
-
+        try:
+            qdrant_client.upsert(collection_name=collection_name, points=points)
+            print(f"✅ Uploaded batch {i // batch_size + 1}/{(total_docs // batch_size) + 1}")
+        except Exception as e:
+            print(f"❌ Error uploading batch {i // batch_size + 1}: {e}")
+    
+    # Force index optimization
+    print("🔄 Forcing index optimization...")
+    try:
+        qdrant_client.update_collection(
+            collection_name=collection_name,
+            optimizers_config=OptimizersConfigDiff(
+                default_segment_number=0,
+                memmap_threshold=20000,
+            )
+        )
+        print("✅ Optimization triggered.")
+    except Exception as e:
+        print(f"❌ Error optimizing collection: {e}")
+    
     print("🎉 Data processing complete!")
 
 if __name__ == "__main__":
