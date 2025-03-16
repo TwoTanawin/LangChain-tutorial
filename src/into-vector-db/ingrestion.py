@@ -4,8 +4,11 @@ from langchain_text_splitters import CharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct
+import torch
 
 load_dotenv()
+
+device = "cuda" if torch.cuda.is_available else "cpu"
 
 if __name__ == "__main__":
     print("Ingestion....")
@@ -20,7 +23,10 @@ if __name__ == "__main__":
     texts = text_splitter.split_documents(document)
     print(f"Created {len(texts)} chunks")
     
-    embedding = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
+    embedding = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-mpnet-base-v2",
+        model_kwargs={"device": device}
+    )
     
     print("Generating embeddings...")
     embeddings = [embedding.embed_query(text.page_content) for text in texts]

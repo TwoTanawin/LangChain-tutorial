@@ -18,3 +18,4 @@ faiss-cpu
 pypdf
 langchainhub
 pymupdf
+beautifulsoup4
